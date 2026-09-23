@@ -19,7 +19,11 @@ func Output(ctx context.Context, name string, args ...string) (string, error) {
 }
 
 func Bytes(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	return Exec(ctx, timeout, stdin, name, args...)
+}
+
+func Exec(ctx context.Context, limit time.Duration, stdin []byte, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, name, args...)

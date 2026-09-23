@@ -19,6 +19,7 @@ var version = "dev"
 
 func main() {
 	disable := flag.String("disable", "", "comma-separated tool groups to leave out ("+strings.Join(tools.Groups(), ", ")+")")
+	config := flag.String("config", tools.DefaultConfig(), "JSON file defining extra command tools")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -35,6 +36,7 @@ func main() {
 	}
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "hyprland", Version: version}, nil)
+	tools.ConfigPath = *config
 	if err := tools.Register(server, skip); err != nil {
 		log.Fatal(err)
 	}
