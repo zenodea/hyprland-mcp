@@ -161,5 +161,6 @@ func registerWindows(s *mcp.Server) error {
 		return nil, done, fmt.Errorf("unknown mode %q", in.Mode)
 	})
 
+	registerWait(s)
 	return nil
 }

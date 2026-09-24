@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -13,7 +14,14 @@ func init() {
 }
 
 type launchArgs struct {
-	Command string `json:"command" jsonschema:"shell command to start detached under Hyprland, e.g. firefox or [workspace 3 silent] kitty"`
+	Command   string `json:"command" jsonschema:"shell command to start detached under Hyprland, e.g. firefox or [workspace 3 silent] kitty"`
+	WaitClass string `json:"wait_class,omitempty" jsonschema:"regex on the new window's class; when set, wait for that window and return it"`
+	Timeout   int    `json:"timeout,omitempty" jsonschema:"seconds to wait for the window, default 10, max 60"`
+}
+
+type launchResult struct {
+	OK     bool    `json:"ok"`
+	Window *window `json:"window,omitempty"`
 }
 
 type dispatchArgs struct {
@@ -35,10 +43,28 @@ type option map[string]any
 func registerHyprland(s *mcp.Server) error {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "launch_app",
-		Description: "Start a program detached under Hyprland, so it outlives this server. Supports Hyprland exec rules in brackets.",
+		Description: "Start a program detached under Hyprland, so it outlives this server. Supports Hyprland exec rules in brackets. Set wait_class to get the new window back once it opens.",
 		Annotations: action("Launch app", false),
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in launchArgs) (*mcp.CallToolResult, ok, error) {
-		return nil, done, hypr.Dispatch("exec", in.Command)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in launchArgs) (*mcp.CallToolResult, launchResult, error) {
+		if in.WaitClass == "" {
+			return nil, launchResult{OK: true}, hypr.Dispatch("exec", in.Command)
+		}
+		m, err := newMatcher(in.WaitClass, "")
+		if err != nil {
+			return nil, launchResult{}, err
+		}
+		before, err := windowAddresses()
+		if err != nil {
+			return nil, launchResult{}, err
+		}
+		if err := hypr.Dispatch("exec", in.Command); err != nil {
+			return nil, launchResult{}, err
+		}
+		w, err := waitForWindow(ctx, m, before, in.Timeout)
+		if err != nil {
+			return nil, launchResult{OK: true}, fmt.Errorf("launched, but %w", err)
+		}
+		return nil, launchResult{OK: true, Window: &w}, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
