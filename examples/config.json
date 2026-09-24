@@ -1,0 +1,31 @@
+{
+  "commands": [
+    {
+      "name": "switch_theme",
+      "description": "Switch the desktop colour theme and reload every themed app.",
+      "command": ["switch-theme", "{theme}"],
+      "args": {
+        "theme": { "description": "theme name, e.g. rose-pine or gruvbox" }
+      },
+      "timeout": 60
+    },
+    {
+      "name": "list_themes",
+      "description": "List the available desktop themes.",
+      "command": ["switch-theme", "--list"],
+      "read_only": true
+    },
+    {
+      "name": "lock_screen",
+      "description": "Lock the session.",
+      "command": ["loginctl", "lock-session"]
+    },
+    {
+      "name": "system_updates",
+      "description": "List pending package updates.",
+      "command": ["checkupdates"],
+      "read_only": true,
+      "timeout": 60
+    }
+  ]
+}
