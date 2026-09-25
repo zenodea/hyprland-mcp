@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -65,6 +67,20 @@ type moveArgs struct {
 	Workspace string `json:"workspace" jsonschema:"target workspace: a number, a name, or special:<name>"`
 	Follow    bool   `json:"follow,omitempty" jsonschema:"also switch to the target workspace"`
 }
+
+type geometryArgs struct {
+	Window string `json:"window,omitempty" jsonschema:"Hyprland window selector; omit for the focused window"`
+	X      *int   `json:"x,omitempty" jsonschema:"left edge in layout pixels (see list_monitors for positions)"`
+	Y      *int   `json:"y,omitempty"`
+	Width  *int   `json:"width,omitempty"`
+	Height *int   `json:"height,omitempty"`
+}
+
+type directionArgs struct {
+	Direction string `json:"direction" jsonschema:"left, right, up or down"`
+}
+
+var directions = map[string]string{"left": "l", "right": "r", "up": "u", "down": "d"}
 
 type fullscreenArgs struct {
 	Mode string `json:"mode,omitempty" jsonschema:"fullscreen (default) or maximize; toggles on the focused window"`
@@ -161,6 +177,114 @@ func registerWindows(s *mcp.Server) error {
 		return nil, done, fmt.Errorf("unknown mode %q", in.Mode)
 	})
 
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "set_window_geometry",
+		Description: "Float a window and give it an exact position and/or size. Only the fields given change.",
+		Annotations: action("Set window geometry", false),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in geometryArgs) (*mcp.CallToolResult, window, error) {
+		target := in.Window
+		if target == "" {
+			var c hypr.Client
+			if err := hypr.Query("activewindow", &c); err != nil {
+				return nil, window{}, err
+			}
+			if c.Address == "" {
+				return nil, window{}, fmt.Errorf("no window is focused")
+			}
+			target = "address:" + c.Address
+		}
+		if in.X == nil && in.Y == nil && in.Width == nil && in.Height == nil {
+			return nil, window{}, fmt.Errorf("give at least one of x, y, width or height")
+		}
+		if err := hypr.Dispatch("setfloating", target); err != nil {
+			return nil, window{}, err
+		}
+		current, err := findWindow(target)
+		if err != nil {
+			return nil, window{}, err
+		}
+		if in.Width != nil || in.Height != nil {
+			w, h := pick(in.Width, current.Size[0]), pick(in.Height, current.Size[1])
+			if err := hypr.Dispatch("resizewindowpixel", fmt.Sprintf("exact %d %d,%s", w, h, target)); err != nil {
+				return nil, window{}, err
+			}
+		}
+		if in.X != nil || in.Y != nil {
+			x, y := pick(in.X, current.At[0]), pick(in.Y, current.At[1])
+			if err := hypr.Dispatch("movewindowpixel", fmt.Sprintf("exact %d %d,%s", x, y, target)); err != nil {
+				return nil, window{}, err
+			}
+		}
+		updated, err := findWindow(target)
+		return nil, toWindow(updated), err
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "pin_window",
+		Description: "Toggle pinning a floating window so it shows on every workspace.",
+		Annotations: action("Pin window", false),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in windowArgs) (*mcp.CallToolResult, ok, error) {
+		return nil, done, hypr.Dispatch("pin", in.Window)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "swap_window",
+		Description: "Swap the focused tiled window with its neighbour in a direction.",
+		Annotations: action("Swap window", false),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directionArgs) (*mcp.CallToolResult, ok, error) {
+		d, known := directions[in.Direction]
+		if !known {
+			return nil, done, fmt.Errorf("direction must be left, right, up or down")
+		}
+		return nil, done, hypr.Dispatch("swapwindow", d)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "move_focus",
+		Description: "Move keyboard focus to the neighbouring window in a direction.",
+		Annotations: action("Move focus", false),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in directionArgs) (*mcp.CallToolResult, ok, error) {
+		d, known := directions[in.Direction]
+		if !known {
+			return nil, done, fmt.Errorf("direction must be left, right, up or down")
+		}
+		return nil, done, hypr.Dispatch("movefocus", d)
+	})
+
 	registerWait(s)
 	return nil
+}
+
+func pick(v *int, fallback int) int {
+	if v != nil {
+		return *v
+	}
+	return fallback
+}
+
+// findWindow resolves an address:0x… selector, or the first window matching class:/title: regexes.
+func findWindow(selector string) (hypr.Client, error) {
+	var clients []hypr.Client
+	if err := hypr.Query("clients", &clients); err != nil {
+		return hypr.Client{}, err
+	}
+	kind, value, _ := strings.Cut(selector, ":")
+	for _, c := range clients {
+		switch kind {
+		case "address":
+			if c.Address == value {
+				return c, nil
+			}
+		case "pid":
+			if strconv.Itoa(c.PID) == value {
+				return c, nil
+			}
+		case "class", "initialclass", "title":
+			field := map[string]string{"class": c.Class, "initialclass": c.InitialClass, "title": c.Title}[kind]
+			if re, err := regexp.Compile(value); err == nil && re.MatchString(field) {
+				return c, nil
+			}
+		}
+	}
+	return hypr.Client{}, fmt.Errorf("no window matches %s", selector)
 }
