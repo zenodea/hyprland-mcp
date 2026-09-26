@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 
@@ -16,6 +17,12 @@ import (
 )
 
 var version = "dev"
+
+func init() {
+	if info, ok := debug.ReadBuildInfo(); ok && version == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		version = info.Main.Version
+	}
+}
 
 func main() {
 	disable := flag.String("disable", "", "comma-separated tool groups to leave out ("+strings.Join(tools.Groups(), ", ")+")")

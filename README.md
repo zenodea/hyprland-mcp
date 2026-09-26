@@ -15,7 +15,12 @@ its tool isn't installed.
 go install github.com/zenodea/hyprland-mcp@latest
 ```
 
-or build from a checkout with `go build`.
+or from a checkout:
+
+```sh
+make install   # builds with the git version into ~/.local/bin
+make test
+```
 
 ## Use with Claude Code
 
@@ -62,17 +67,29 @@ private content, so think before allowing them without a prompt.
 
 | Group | Tools | Needs |
 |---|---|---|
-| `windows` | `list_windows`, `active_window`, `focus_window`, `close_window`, `move_window`, `toggle_floating`, `toggle_fullscreen` | Hyprland |
+| `windows` | `list_windows`, `active_window`, `focus_window`, `close_window`, `move_window`, `toggle_floating`, `toggle_fullscreen`, `set_window_geometry`, `pin_window`, `swap_window`, `move_focus`, `wait_for_window` | Hyprland |
 | `workspaces` | `list_workspaces`, `list_monitors`, `switch_workspace` | Hyprland |
 | `hyprland` | `launch_app`, `get_option`, `set_option`, `hypr_dispatch` | Hyprland |
+| `apps` | `list_apps` | — |
+| `layouts` | `save_layout`, `list_layouts`, `restore_layout`, `delete_layout` | Hyprland |
 | `audio` | `audio_status`, `set_volume`, `set_mute`, `set_default_audio` | `wpctl` |
 | `media` | `media_status`, `media_control` | `playerctl` |
 | `network` | `network_status`, `list_wifi`, `connect_wifi`, `set_connection`, `set_wifi` | `nmcli` |
 | `bluetooth` | `bluetooth_status`, `bluetooth_connect`, `set_bluetooth` | `bluetoothctl` |
 | `desktop` | `notify`, `screenshot`, `get_brightness`, `set_brightness`, `get_clipboard`, `set_clipboard` | `notify-send`, `grim` (+ `slurp`), `brightnessctl`, `wl-clipboard` |
+| `system` | `system_info`, `battery_status`, `top_processes`, `kill_process`, `power_profile`, `set_power_profile`, `session_action` | `powerprofilesctl` for profiles |
+| `toggles` | `keyboard_layouts`, `switch_keyboard_layout`, `open`, `get_do_not_disturb`, `set_do_not_disturb` | `xdg-open`; dunst, SwayNC or mako for do-not-disturb |
 | `custom` | anything in the config file | — |
 
 Leave groups out with `-disable`, e.g. `hyprland-mcp -disable network,bluetooth`.
+
+`launch_app` takes `wait_class` to return the window it opened, so an agent
+can start an app and then move or resize it in the next step.
+
+Layouts are stored in `~/.local/state/hyprland-mcp/layouts.json`. Restoring
+one moves open windows back to their saved workspace (and floating geometry)
+and launches the ones that aren't open from their saved command line. Tiled
+windows get their workspace back, but not their exact tile.
 
 Windows are picked with Hyprland's own selectors: `address:0x…`,
 `class:^(firefox)$`, `title:…` or `pid:…`. Most window tools act on the
@@ -110,3 +127,7 @@ Any command can become a tool by listing it in
 Arguments are validated against their declared set before anything runs,
 and an optional argument left empty drops its argv element. See
 [`examples/config.json`](examples/config.json).
+
+## License
+
+MIT
