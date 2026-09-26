@@ -54,12 +54,27 @@ func readBrightness(ctx context.Context) (brightness, error) {
 	if err != nil {
 		return brightness{}, err
 	}
+	return parseBrightness(text)
+}
+
+func parseBrightness(text string) (brightness, error) {
 	f := strings.Split(strings.Split(text, "\n")[0], ",")
 	if len(f) < 4 {
 		return brightness{}, fmt.Errorf("no backlight found")
 	}
 	pct, _ := strconv.Atoi(strings.TrimSuffix(f[3], "%"))
 	return brightness{Device: f[0], Percent: pct}, nil
+}
+
+// brightnessLevel formats brightnessctl's value: 40%, 5%+ or 5%-.
+func brightnessLevel(percent int, relative bool) string {
+	if !relative {
+		return fmt.Sprintf("%d%%", max(percent, 1))
+	}
+	if percent < 0 {
+		return fmt.Sprintf("%d%%-", -percent)
+	}
+	return fmt.Sprintf("%d%%+", percent)
 }
 
 func screenshotArea(target string) ([]string, error) {
@@ -150,11 +165,7 @@ func registerDesktop(s *mcp.Server) error {
 			Description: "Set or change the screen backlight. Never goes below 1% so the screen stays visible.",
 			Annotations: action("Set brightness", false),
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, in brightnessArgs) (*mcp.CallToolResult, brightness, error) {
-			level := fmt.Sprintf("%d%%", max(in.Percent, 1))
-			if in.Relative {
-				level = fmt.Sprintf("%+d%%", in.Percent)
-				level = level[1:] + level[:1]
-			}
+			level := brightnessLevel(in.Percent, in.Relative)
 			if _, err := run.Output(ctx, "brightnessctl", "-c", "backlight", "-n", "1%", "set", level); err != nil {
 				return nil, brightness{}, err
 			}

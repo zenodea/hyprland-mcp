@@ -36,6 +36,16 @@ var mediaActions = []string{"play", "pause", "play-pause", "next", "previous", "
 
 const sep = "\x1f"
 
+func parsePlayers(text string) []player {
+	out := []player{}
+	for _, line := range strings.Split(text, "\n") {
+		if f := strings.Split(line, sep); len(f) == 5 {
+			out = append(out, player{Name: f[0], Status: f[1], Artist: f[2], Title: f[3], Album: f[4]})
+		}
+	}
+	return out
+}
+
 func registerMedia(s *mcp.Server) error {
 	if !run.Has("playerctl") {
 		return nil
@@ -55,12 +65,7 @@ func registerMedia(s *mcp.Server) error {
 			}
 			return nil, out, err
 		}
-		for _, line := range strings.Split(text, "\n") {
-			f := strings.Split(line, sep)
-			if len(f) == 5 {
-				out.Players = append(out.Players, player{Name: f[0], Status: f[1], Artist: f[2], Title: f[3], Album: f[4]})
-			}
-		}
+		out.Players = parsePlayers(text)
 		return nil, out, nil
 	})
 

@@ -87,13 +87,39 @@ func nmRows(ctx context.Context, fields int, args ...string) ([][]string, error)
 	if err != nil {
 		return nil, err
 	}
+	return parseTerseRows(text, fields), nil
+}
+
+// parseWifi merges access points that share an SSID, keeping the strongest signal.
+func parseWifi(rows [][]string) []wifiNetwork {
+	out := []wifiNetwork{}
+	seen := map[string]int{}
+	for _, f := range rows {
+		if f[1] == "" {
+			continue
+		}
+		signal, _ := strconv.Atoi(f[2])
+		n := wifiNetwork{SSID: f[1], Signal: signal, Security: f[3], InUse: f[0] == "*"}
+		if i, dup := seen[n.SSID]; dup {
+			prev := &out[i]
+			prev.InUse = prev.InUse || n.InUse
+			prev.Signal = max(prev.Signal, n.Signal)
+			continue
+		}
+		seen[n.SSID] = len(out)
+		out = append(out, n)
+	}
+	return out
+}
+
+func parseTerseRows(text string, fields int) [][]string {
 	var rows [][]string
 	for _, line := range strings.Split(text, "\n") {
 		if f := terse(line); line != "" && len(f) == fields {
 			rows = append(rows, f)
 		}
 	}
-	return rows, nil
+	return rows
 }
 
 func onOff(b bool) string {
@@ -150,22 +176,7 @@ func registerNetwork(s *mcp.Server) error {
 		if err != nil {
 			return nil, out, err
 		}
-		seen := map[string]int{}
-		for _, f := range rows {
-			if f[1] == "" {
-				continue
-			}
-			signal, _ := strconv.Atoi(f[2])
-			n := wifiNetwork{SSID: f[1], Signal: signal, Security: f[3], InUse: f[0] == "*"}
-			if i, dup := seen[n.SSID]; dup {
-				prev := &out.Networks[i]
-				prev.InUse = prev.InUse || n.InUse
-				prev.Signal = max(prev.Signal, n.Signal)
-				continue
-			}
-			seen[n.SSID] = len(out.Networks)
-			out.Networks = append(out.Networks, n)
-		}
+		out.Networks = parseWifi(rows)
 		return nil, out, nil
 	})
 

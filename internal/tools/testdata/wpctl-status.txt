@@ -1,0 +1,46 @@
+PipeWire 'pipewire-0' [1.6.8, user@host, cookie:1]
+ └─ Clients:
+        32. WirePlumber                         [1.6.8, user@host, pid:2709]
+        33. pipewire                            [1.6.8, user@host, pid:2710]
+        43. WirePlumber [client]                [1.6.8, user@host, pid:2709]
+        60. xdg-desktop-portal                  [1.6.8, user@host, pid:2746]
+        61. quickshell                          [1.6.8, user@host, pid:712439]
+        62. libcanberra                         [1.6.8, user@host, pid:318603]
+        65. speech-dispatcher-dummy             [1.6.8, user@host, pid:15261]
+        71.                                     [1.6.8, user@host, pid:318603]
+        72.                                     [1.6.8, user@host, pid:11188]
+        73. wpctl                               [1.6.8, user@host, pid:891176]
+
+Audio
+ ├─ Devices:
+ │      57. Built-in Audio                      [alsa]
+ │  
+ ├─ Sinks:
+ │  *   46. Built-in Audio Analog Stereo        [vol: 1.05]
+ │  
+ ├─ Sources:
+ │  *   56. Built-in Audio Analog Stereo        [vol: 1.00]
+ │  
+ ├─ Filters:
+ │  
+ └─ Streams:
+        67. speech-dispatcher-dummy                                     
+             66. output_FR       > ALC285 Analog:playback_FR	[init]
+             69. output_FL       > ALC285 Analog:playback_FL	[init]
+
+Video
+ ├─ Devices:
+ │      44. Laptop Webcam Module (2nd Gen)      [v4l2]
+ │      45. Laptop Webcam Module (2nd Gen)      [v4l2]
+ │  
+ ├─ Sinks:
+ │  
+ ├─ Sources:
+ │  *   54. Laptop Webcam Module (2nd Gen) (V4L2)
+ │  
+ ├─ Filters:
+ │  
+ └─ Streams:
+
+Settings
+ └─ Default Configured Devices:

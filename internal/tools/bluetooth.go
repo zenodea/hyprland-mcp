@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -37,13 +38,17 @@ func btDevices(ctx context.Context, filter string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseBtDevices(text), nil
+}
+
+func parseBtDevices(text string) map[string]string {
 	out := map[string]string{}
 	for _, line := range strings.Split(text, "\n") {
 		if m := btDeviceLine.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
 			out[m[1]] = m[2]
 		}
 	}
-	return out, nil
+	return out
 }
 
 func registerBluetooth(s *mcp.Server) error {
@@ -74,6 +79,7 @@ func registerBluetooth(s *mcp.Server) error {
 			_, on := connected[addr]
 			out.Devices = append(out.Devices, btDevice{addr, name, on})
 		}
+		slices.SortFunc(out.Devices, func(a, b btDevice) int { return strings.Compare(a.Name, b.Name) })
 		return nil, out, nil
 	})
 

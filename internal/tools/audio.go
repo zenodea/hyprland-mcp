@@ -63,15 +63,24 @@ func wpTarget(target string) (string, error) {
 	return target, nil
 }
 
-func audioState(ctx context.Context) (audioStatus, error) {
-	text, err := run.Output(ctx, "wpctl", "status")
-	if err != nil {
-		return audioStatus{}, err
+// volumeLevel formats wpctl's value: 40%, 5%+ or 5%-.
+func volumeLevel(percent int, relative bool) (string, error) {
+	switch {
+	case relative && percent < 0:
+		return fmt.Sprintf("%d%%-", -percent), nil
+	case relative:
+		return fmt.Sprintf("%d%%+", percent), nil
+	case percent < 0:
+		return "", fmt.Errorf("percent must be positive unless relative is set")
 	}
+	return fmt.Sprintf("%d%%", percent), nil
+}
+
+func parseWpctlStatus(text string) audioStatus {
 	out := audioStatus{Outputs: []audioNode{}, Inputs: []audioNode{}, Streams: []audioNode{}}
 	inAudio, section := false, ""
 	for _, line := range strings.Split(text, "\n") {
-		trimmed := strings.Trim(line, " │├└─")
+		trimmed := strings.Trim(line, " │├└─\t")
 		switch {
 		case !strings.HasPrefix(line, " ") && trimmed != "":
 			inAudio = trimmed == "Audio"
@@ -96,16 +105,34 @@ func audioState(ctx context.Context) (audioStatus, error) {
 		case "Sources":
 			out.Inputs = append(out.Inputs, node)
 		case "Streams":
-			if len(line)-len(strings.TrimLeft(line, " ")) > 10 {
-				continue
+			if len(line)-len(strings.TrimLeft(line, " ")) <= 10 {
+				out.Streams = append(out.Streams, node)
 			}
-			if v, err := run.Output(ctx, "wpctl", "get-volume", m[2]); err == nil {
-				if vm := volumeLine.FindStringSubmatch(v); vm != nil {
-					node.Volume, _ = strconv.ParseFloat(vm[1], 64)
-					node.Muted = vm[2] != ""
-				}
+		}
+	}
+	return out
+}
+
+func parseVolume(text string) (float64, bool, bool) {
+	m := volumeLine.FindStringSubmatch(text)
+	if m == nil {
+		return 0, false, false
+	}
+	v, _ := strconv.ParseFloat(m[1], 64)
+	return v, m[2] != "", true
+}
+
+func audioState(ctx context.Context) (audioStatus, error) {
+	text, err := run.Output(ctx, "wpctl", "status")
+	if err != nil {
+		return audioStatus{}, err
+	}
+	out := parseWpctlStatus(text)
+	for i, st := range out.Streams {
+		if v, err := run.Output(ctx, "wpctl", "get-volume", strconv.Itoa(st.ID)); err == nil {
+			if vol, muted, ok := parseVolume(v); ok {
+				out.Streams[i].Volume, out.Streams[i].Muted = vol, muted
 			}
-			out.Streams = append(out.Streams, node)
 		}
 	}
 	return out, nil
@@ -134,15 +161,9 @@ func registerAudio(s *mcp.Server) error {
 		if err != nil {
 			return nil, done, err
 		}
-		level := fmt.Sprintf("%d%%", in.Percent)
-		if in.Relative {
-			if in.Percent < 0 {
-				level = fmt.Sprintf("%d%%-", -in.Percent)
-			} else {
-				level += "+"
-			}
-		} else if in.Percent < 0 {
-			return nil, done, fmt.Errorf("percent must be positive unless relative is set")
+		level, err := volumeLevel(in.Percent, in.Relative)
+		if err != nil {
+			return nil, done, err
 		}
 		_, err = run.Output(ctx, "wpctl", "set-volume", "-l", "1.5", target, level)
 		return nil, done, err

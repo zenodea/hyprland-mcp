@@ -1,0 +1,42 @@
+PipeWire 'pipewire-0' [1.6.8, user@host, cookie:1]
+ └─ Clients:
+        32. WirePlumber                         [1.6.8, user@host, pid:2709]
+        88. Spotify                             [1.6.8, user@host, pid:4400]
+
+Audio
+ ├─ Devices:
+ │      57. Built-in Audio                      [alsa]
+ │      91. Nothing Headphone (1)               [bluez5]
+ │  
+ ├─ Sinks:
+ │      46. Built-in Audio Analog Stereo        [vol: 0.40 MUTED]
+ │  *   92. Nothing Headphone (1)               [vol: 0.75]
+ │  
+ ├─ Sources:
+ │  *   56. Built-in Audio Analog Stereo        [vol: 1.00]
+ │  
+ ├─ Filters:
+ │  
+ └─ Streams:
+        101. spotify                                                    
+             102. output_FL       > Nothing Headphone (1):playback_FL	[active]
+             103. output_FR       > Nothing Headphone (1):playback_FR	[active]
+        110. Firefox                                                    
+             111. output_FL       > Nothing Headphone (1):playback_FL	[active]
+
+Video
+ ├─ Devices:
+ │      44. Laptop Webcam Module (2nd Gen)      [v4l2]
+ │  
+ ├─ Sinks:
+ │  
+ ├─ Sources:
+ │  *   54. Laptop Webcam Module (2nd Gen) (V4L2)
+ │  
+ ├─ Filters:
+ │  
+ └─ Streams:
+
+Settings
+ └─ Default Configured Devices:
+         0. Audio/Sink    bluez_output.3C_00_00_00_00_00.1
