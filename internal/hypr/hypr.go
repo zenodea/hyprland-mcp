@@ -1,6 +1,8 @@
 package hypr
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,15 @@ import (
 )
 
 func socket() (string, error) {
+	return socketPath(".socket.sock")
+}
+
+// Dir is Hyprland's runtime directory for this instance, where it and its tools keep their sockets.
+func Dir() (string, error) {
+	return socketPath("")
+}
+
+func socketPath(name string) (string, error) {
 	sig := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE")
 	if sig == "" {
 		return "", errors.New("not running under Hyprland (HYPRLAND_INSTANCE_SIGNATURE is unset)")
@@ -21,7 +32,7 @@ func socket() (string, error) {
 	if runtime == "" {
 		runtime = fmt.Sprintf("/run/user/%d", os.Getuid())
 	}
-	return filepath.Join(runtime, "hypr", sig, ".socket.sock"), nil
+	return filepath.Join(runtime, "hypr", sig, name), nil
 }
 
 func Request(cmd string) ([]byte, error) {
@@ -71,6 +82,44 @@ func expectOK(out []byte, err error) error {
 	return nil
 }
 
+type Event struct {
+	Name string
+	Data string
+}
+
+// Events connects to Hyprland's event socket and streams events until ctx ends.
+// The channel closes when the connection does.
+func Events(ctx context.Context) (<-chan Event, error) {
+	path, err := socketPath(".socket2.sock")
+	if err != nil {
+		return nil, err
+	}
+	conn, err := net.DialTimeout("unix", path, 2*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to Hyprland events: %w", err)
+	}
+	events := make(chan Event, 64)
+	go func() {
+		<-ctx.Done()
+		conn.Close()
+	}()
+	go func() {
+		defer close(events)
+		defer conn.Close()
+		lines := bufio.NewScanner(conn)
+		lines.Buffer(make([]byte, 64*1024), 1024*1024)
+		for lines.Scan() {
+			name, data, _ := strings.Cut(lines.Text(), ">>")
+			select {
+			case events <- Event{name, data}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return events, nil
+}
+
 type Ref struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
@@ -115,6 +164,8 @@ type Monitor struct {
 	Y               int     `json:"y"`
 	Scale           float64 `json:"scale"`
 	ActiveWorkspace Ref     `json:"activeWorkspace"`
+	Transform       int     `json:"transform"`
 	Focused         bool    `json:"focused"`
+	DPMS            bool    `json:"dpmsStatus"`
 	Disabled        bool    `json:"disabled"`
 }

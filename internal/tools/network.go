@@ -185,11 +185,12 @@ func registerNetwork(s *mcp.Server) error {
 		Description: "Connect to a wifi network. Saved networks need no password.",
 		Annotations: action("Connect to wifi", false),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in connectWifiArgs) (*mcp.CallToolResult, ok, error) {
-		args := []string{"device", "wifi", "connect", in.SSID}
-		if in.Password != "" {
-			args = append(args, "password", in.Password)
+		if in.Password == "" {
+			_, err := run.Output(ctx, "nmcli", "device", "wifi", "connect", in.SSID)
+			return nil, done, err
 		}
-		_, err := run.Output(ctx, "nmcli", args...)
+		// --ask reads the password from stdin, so it never shows up in the process list.
+		_, err := run.Bytes(ctx, []byte(in.Password+"\n"), "nmcli", "--ask", "device", "wifi", "connect", in.SSID)
 		return nil, done, err
 	})
 

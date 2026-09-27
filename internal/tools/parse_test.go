@@ -2,6 +2,10 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
+	"image"
+	"image/png"
 	"os"
 	"reflect"
 	"strings"
@@ -125,14 +129,37 @@ func TestParseBtDevices(t *testing.T) {
 }
 
 func TestParsePlayers(t *testing.T) {
-	text := strings.Join([]string{"spotify", "Playing", "Artist", "Song", "Album"}, sep) + "\n" +
-		strings.Join([]string{"firefox", "Paused", "", "Video", ""}, sep)
+	text := strings.Join([]string{"spotify", "Playing", "Artist", "Song", "Album", "162000000", "2235000000", "0.5"}, sep) + "\n" +
+		strings.Join([]string{"firefox", "Paused", "", "Video", "", "", "", ""}, sep)
 	want := []player{
-		{Name: "spotify", Status: "Playing", Artist: "Artist", Title: "Song", Album: "Album"},
+		{Name: "spotify", Status: "Playing", Artist: "Artist", Title: "Song", Album: "Album", Position: new(162.0), Length: new(2235.0), Volume: new(50)},
 		{Name: "firefox", Status: "Paused", Title: "Video"},
 	}
 	if got := parsePlayers(text); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v", got)
+	}
+}
+
+func TestPlayerctlArgs(t *testing.T) {
+	cases := []struct {
+		in   mediaArgs
+		want []string
+	}{
+		{mediaArgs{Action: "next"}, []string{"next"}},
+		{mediaArgs{Action: "seek", Value: 90}, []string{"position", "90"}},
+		{mediaArgs{Action: "seek", Value: -10, Relative: true, Player: "mpv"}, []string{"--player", "mpv", "position", "10-"}},
+		{mediaArgs{Action: "volume", Value: 40}, []string{"volume", "0.4"}},
+		{mediaArgs{Action: "volume", Value: 5, Relative: true}, []string{"volume", "0.05+"}},
+	}
+	for _, c := range cases {
+		if got, err := playerctlArgs(c.in); err != nil || !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%+v: got %v, %v", c.in, got, err)
+		}
+	}
+	for _, bad := range []mediaArgs{{Action: "rewind"}, {Action: "seek", Value: -5}} {
+		if _, err := playerctlArgs(bad); err == nil {
+			t.Errorf("%+v should fail", bad)
+		}
 	}
 }
 
@@ -277,5 +304,121 @@ func TestWindowMatcher(t *testing.T) {
 	}
 	if _, err := newMatcher("", ""); err == nil {
 		t.Error("empty matcher should fail")
+	}
+}
+
+func TestShortcut(t *testing.T) {
+	cases := map[string]string{
+		"ctrl+t":           "CTRL, t",
+		"Ctrl+Shift+Tab":   "CTRL SHIFT, Tab",
+		"super + Return":   "SUPER, Return",
+		"F5":               ", F5",
+		"win+alt+Print":    "SUPER ALT, Print",
+		"control+plus":     "CTRL, plus",
+		"shift+mod1+space": "SHIFT ALT, space",
+	}
+	for in, want := range cases {
+		if got, err := shortcut(in); err != nil || got != want {
+			t.Errorf("%s: got %q, %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"ctrl+", "hyper+t", ""} {
+		if _, err := shortcut(bad); err == nil {
+			t.Errorf("%q should fail", bad)
+		}
+	}
+}
+
+func TestToBind(t *testing.T) {
+	got := toBind(rawBind{Modmask: 64 + 1, Key: "Q", Dispatcher: "killactive"})
+	if got.Keys != "SUPER+SHIFT+Q" || got.Dispatcher != "killactive" {
+		t.Errorf("got %+v", got)
+	}
+	if got := toBind(rawBind{Keycode: 49}); got.Keys != "code:49" {
+		t.Errorf("keycode bind: %+v", got)
+	}
+}
+
+func TestParseLayers(t *testing.T) {
+	var raw rawLayers
+	data := `{"eDP-1":{"levels":{"0":[{"x":0,"y":0,"w":1728,"h":1152,"namespace":"awww-daemon","pid":2145}],"1":[],"2":[{"x":0,"y":0,"w":1728,"h":36,"namespace":"waybar","pid":7}]}}}`
+	if err := json.Unmarshal([]byte(data), &raw); err != nil {
+		t.Fatal(err)
+	}
+	want := []layer{
+		{Monitor: "eDP-1", Level: "background", Namespace: "awww-daemon", PID: 2145, Size: [2]int{1728, 1152}},
+		{Monitor: "eDP-1", Level: "top", Namespace: "waybar", PID: 7, Size: [2]int{1728, 36}},
+	}
+	if got := parseLayers(raw); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestParseWallpapers(t *testing.T) {
+	www := ": eDP-1: 1728x1152, scale: 1.6666666, currently displaying: image: /w/a.jpg\n" +
+		": DP-1: 2304x1296, scale: 1, currently displaying: color: 000000"
+	want := []wallpaper{{"eDP-1", "/w/a.jpg"}, {"DP-1", "color: 000000"}}
+	if got := parseWallpapers("awww", www); !reflect.DeepEqual(got, want) {
+		t.Errorf("awww: got %+v", got)
+	}
+	paper := "eDP-1 = /w/a.jpg\nDP-1 = /w/b.png"
+	want = []wallpaper{{"eDP-1", "/w/a.jpg"}, {"DP-1", "/w/b.png"}}
+	if got := parseWallpapers("hyprpaper", paper); !reflect.DeepEqual(got, want) {
+		t.Errorf("hyprpaper: got %+v", got)
+	}
+}
+
+func TestMonitorRule(t *testing.T) {
+	m := hypr.Monitor{Name: "DP-1", Width: 3840, Height: 2160, RefreshRate: 59.997, X: 1728, Y: 0}
+	if got := monitorRule(m, 1.5); got != "DP-1,3840x2160@59.997,1728x0,1.5" {
+		t.Errorf("got %s", got)
+	}
+	m.Transform = 1
+	if got := monitorRule(m, 2); got != "DP-1,3840x2160@59.997,1728x0,2,transform,1" {
+		t.Errorf("transform: got %s", got)
+	}
+}
+
+func TestClipboardImage(t *testing.T) {
+	cases := []struct {
+		types []string
+		want  string
+	}{
+		{[]string{"image/png"}, "image/png"},
+		{[]string{"text/html", "image/jpeg", "image/png"}, "image/png"},
+		{[]string{"image/bmp"}, "image/bmp"},
+		{[]string{"text/plain;charset=utf-8", "image/png"}, ""},
+		{[]string{"UTF8_STRING", "TEXT"}, ""},
+		{[]string{"text/uri-list"}, ""},
+	}
+	for _, c := range cases {
+		if got := clipboardImage(c.types); got != c.want {
+			t.Errorf("%v: got %q", c.types, got)
+		}
+	}
+}
+
+func TestShrinkImage(t *testing.T) {
+	encode := func(w, h int) []byte {
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, w, h))); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
+	}
+	small := encode(100, 50)
+	if got, mime, err := shrinkImage(small, "image/png"); err != nil || mime != "image/png" || !bytes.Equal(got, small) {
+		t.Errorf("small image should pass through: %s %v", mime, err)
+	}
+	got, mime, err := shrinkImage(encode(4000, 1000), "image/png")
+	if err != nil || mime != "image/jpeg" {
+		t.Fatalf("large image: %s %v", mime, err)
+	}
+	img, _, err := image.Decode(bytes.NewReader(got))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := img.Bounds(); b.Dx() != 1000 || b.Dy() != 250 {
+		t.Errorf("large image resized to %v", b)
 	}
 }

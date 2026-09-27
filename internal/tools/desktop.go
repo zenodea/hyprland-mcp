@@ -43,6 +43,7 @@ type brightnessArgs struct {
 type clipboard struct {
 	Text      string `json:"text"`
 	Truncated bool   `json:"truncated,omitempty"`
+	Image     string `json:"image,omitempty" jsonschema:"MIME type of an image on the clipboard, returned as image content"`
 }
 
 type clipboardArgs struct {
@@ -77,7 +78,7 @@ func brightnessLevel(percent int, relative bool) string {
 	return fmt.Sprintf("%d%%+", percent)
 }
 
-func screenshotArea(target string) ([]string, error) {
+func screenshotArea(ctx context.Context, target string) ([]string, error) {
 	switch target {
 	case "", "monitor":
 		var monitors []hypr.Monitor
@@ -102,7 +103,7 @@ func screenshotArea(target string) ([]string, error) {
 	case "all":
 		return nil, nil
 	case "region":
-		geometry, err := run.Output(context.Background(), "slurp")
+		geometry, err := run.Output(ctx, "slurp")
 		if err != nil {
 			return nil, fmt.Errorf("selection cancelled")
 		}
@@ -133,7 +134,7 @@ func registerDesktop(s *mcp.Server) error {
 			Description: "Capture the screen and return it as an image, to see what the user sees.",
 			Annotations: readOnly("Screenshot"),
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, in screenshotArgs) (*mcp.CallToolResult, any, error) {
-			area, err := screenshotArea(in.Target)
+			area, err := screenshotArea(ctx, in.Target)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -177,14 +178,29 @@ func registerDesktop(s *mcp.Server) error {
 	if run.Has("wl-paste") && run.Has("wl-copy") {
 		mcp.AddTool(s, &mcp.Tool{
 			Name:        "get_clipboard",
-			Description: "Read the text currently on the clipboard.",
+			Description: "Read what is on the clipboard: text, or an image returned as image content.",
 			Annotations: readOnly("Get clipboard"),
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, clipboard, error) {
-			raw, err := run.Bytes(ctx, nil, "wl-paste", "--no-newline", "--type", "text")
+			types, err := run.Output(ctx, "wl-paste", "--list-types")
 			if err != nil {
 				if strings.Contains(err.Error(), "Nothing is copied") || strings.Contains(err.Error(), "No selection") {
 					return nil, clipboard{}, nil
 				}
+				return nil, clipboard{}, err
+			}
+			if mime := clipboardImage(strings.Split(types, "\n")); mime != "" {
+				raw, err := run.Bytes(ctx, nil, "wl-paste", "--type", mime)
+				if err != nil {
+					return nil, clipboard{}, err
+				}
+				img, mime, err := shrinkImage(raw, mime)
+				if err != nil {
+					return nil, clipboard{}, err
+				}
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.ImageContent{Data: img, MIMEType: mime}}}, clipboard{Image: mime}, nil
+			}
+			raw, err := run.Bytes(ctx, nil, "wl-paste", "--no-newline", "--type", "text")
+			if err != nil {
 				return nil, clipboard{}, err
 			}
 			text := string(raw)

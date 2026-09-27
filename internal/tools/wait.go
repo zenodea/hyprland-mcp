@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -69,12 +70,25 @@ func windowAddresses() (map[string]bool, error) {
 	return seen, nil
 }
 
-// waitForWindow polls until a window matches, skipping addresses in exclude.
+// waitForWindow waits until a window matches, skipping addresses in exclude.
+// It rechecks whenever Hyprland reports a window opening or being retitled,
+// and polls as well in case the event socket is unavailable.
 func waitForWindow(ctx context.Context, m windowMatcher, exclude map[string]bool, seconds int) (window, error) {
 	if seconds <= 0 {
 		seconds = defaultWait
 	}
-	deadline := time.Now().Add(time.Duration(min(seconds, maxWait)) * time.Second)
+	seconds = min(seconds, maxWait)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
+	defer cancel()
+
+	poll := pollEvery
+	events, err := hypr.Events(ctx)
+	if err == nil {
+		poll = time.Second
+	}
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+
 	for {
 		var clients []hypr.Client
 		if err := hypr.Query("clients", &clients); err != nil {
@@ -85,15 +99,29 @@ func waitForWindow(ctx context.Context, m windowMatcher, exclude map[string]bool
 				return toWindow(c), nil
 			}
 		}
-		if time.Now().After(deadline) {
-			return window{}, fmt.Errorf("no matching window appeared within %ds", seconds)
-		}
-		select {
-		case <-ctx.Done():
-			return window{}, ctx.Err()
-		case <-time.After(pollEvery):
+		for changed := false; !changed; {
+			select {
+			case <-ctx.Done():
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					return window{}, fmt.Errorf("no matching window appeared within %ds", seconds)
+				}
+				return window{}, ctx.Err()
+			case <-ticker.C:
+				changed = true
+			case e, open := <-events:
+				if !open {
+					events = nil
+					ticker.Reset(pollEvery)
+				}
+				changed = !open || windowEvents[e.Name]
+			}
 		}
 	}
+}
+
+// windowEvents are the Hyprland events after which a waited-for window may match.
+var windowEvents = map[string]bool{
+	"openwindow": true, "windowtitle": true, "windowtitlev2": true, "movewindow": true, "movewindowv2": true,
 }
 
 func registerWait(s *mcp.Server) {

@@ -86,23 +86,28 @@ type fullscreenArgs struct {
 	Mode string `json:"mode,omitempty" jsonschema:"fullscreen (default) or maximize; toggles on the focused window"`
 }
 
+func listWindows() (windowList, error) {
+	var clients []hypr.Client
+	if err := hypr.Query("clients", &clients); err != nil {
+		return windowList{}, err
+	}
+	out := windowList{Windows: []window{}}
+	for _, c := range clients {
+		if c.Mapped && !c.Hidden {
+			out.Windows = append(out.Windows, toWindow(c))
+		}
+	}
+	return out, nil
+}
+
 func registerWindows(s *mcp.Server) error {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_windows",
 		Description: "List every mapped window with its address, class, title, workspace and state.",
 		Annotations: readOnly("List windows"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, windowList, error) {
-		var clients []hypr.Client
-		if err := hypr.Query("clients", &clients); err != nil {
-			return nil, windowList{}, err
-		}
-		out := windowList{Windows: []window{}}
-		for _, c := range clients {
-			if c.Mapped && !c.Hidden {
-				out.Windows = append(out.Windows, toWindow(c))
-			}
-		}
-		return nil, out, nil
+		out, err := listWindows()
+		return nil, out, err
 	})
 
 	mcp.AddTool(s, &mcp.Tool{

@@ -3,6 +3,9 @@ package tools
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -39,6 +42,108 @@ type setOptionArgs struct {
 }
 
 type option map[string]any
+
+type bindArgs struct {
+	Query string `json:"query,omitempty" jsonschema:"case-insensitive filter on keys, dispatcher, argument and description, e.g. firefox or screenshot"`
+}
+
+type bind struct {
+	Keys        string `json:"keys"`
+	Dispatcher  string `json:"dispatcher"`
+	Arg         string `json:"arg,omitempty"`
+	Description string `json:"description,omitempty"`
+	Submap      string `json:"submap,omitempty"`
+	Mouse       bool   `json:"mouse,omitempty"`
+	Locked      bool   `json:"locked,omitempty"`
+	Release     bool   `json:"release,omitempty"`
+	Repeat      bool   `json:"repeat,omitempty"`
+}
+
+type bindList struct {
+	Binds []bind `json:"binds"`
+}
+
+type rawBind struct {
+	Locked      bool   `json:"locked"`
+	Mouse       bool   `json:"mouse"`
+	Release     bool   `json:"release"`
+	Repeat      bool   `json:"repeat"`
+	Modmask     int    `json:"modmask"`
+	Submap      string `json:"submap"`
+	Key         string `json:"key"`
+	Keycode     int    `json:"keycode"`
+	Description string `json:"description"`
+	Dispatcher  string `json:"dispatcher"`
+	Arg         string `json:"arg"`
+}
+
+// modNames follow Hyprland's modmask bits in the order people write them.
+var modNames = []struct {
+	bit  int
+	name string
+}{{64, "SUPER"}, {4, "CTRL"}, {8, "ALT"}, {1, "SHIFT"}, {2, "CAPS"}, {16, "MOD2"}, {32, "MOD3"}, {128, "MOD5"}}
+
+func toBind(r rawBind) bind {
+	var keys []string
+	for _, m := range modNames {
+		if r.Modmask&m.bit != 0 {
+			keys = append(keys, m.name)
+		}
+	}
+	key := r.Key
+	if key == "" && r.Keycode != 0 {
+		key = "code:" + strconv.Itoa(r.Keycode)
+	}
+	keys = append(keys, key)
+	return bind{
+		Keys: strings.Join(keys, "+"), Dispatcher: r.Dispatcher, Arg: r.Arg, Description: r.Description,
+		Submap: r.Submap, Mouse: r.Mouse, Locked: r.Locked, Release: r.Release, Repeat: r.Repeat,
+	}
+}
+
+type layer struct {
+	Monitor   string `json:"monitor"`
+	Level     string `json:"level"`
+	Namespace string `json:"namespace"`
+	PID       int    `json:"pid"`
+	Position  [2]int `json:"position"`
+	Size      [2]int `json:"size"`
+}
+
+type layerList struct {
+	Layers []layer `json:"layers"`
+}
+
+var layerLevels = map[string]string{"0": "background", "1": "bottom", "2": "top", "3": "overlay"}
+
+// rawLayers is hyprctl layers: monitor -> level number -> surfaces.
+type rawLayers map[string]struct {
+	Levels map[string][]struct {
+		X, Y, W, H int
+		Namespace  string `json:"namespace"`
+		PID        int    `json:"pid"`
+	} `json:"levels"`
+}
+
+func parseLayers(raw rawLayers) []layer {
+	out := []layer{}
+	for monitor, m := range raw {
+		for level, surfaces := range m.Levels {
+			for _, l := range surfaces {
+				out = append(out, layer{monitor, layerLevels[level], l.Namespace, l.PID, [2]int{l.X, l.Y}, [2]int{l.W, l.H}})
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b layer) int {
+		return strings.Compare(a.Monitor+a.Level+a.Namespace, b.Monitor+b.Level+b.Namespace)
+	})
+	return out
+}
+
+type cursor struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
 
 func registerHyprland(s *mcp.Server) error {
 	mcp.AddTool(s, &mcp.Tool{
@@ -90,6 +195,69 @@ func registerHyprland(s *mcp.Server) error {
 		Annotations: action("Hyprland dispatch", true),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in dispatchArgs) (*mcp.CallToolResult, ok, error) {
 		return nil, done, hypr.Dispatch(in.Dispatcher, in.Args)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_binds",
+		Description: "List Hyprland key bindings with what each one does, e.g. to answer \"what's my shortcut for X?\".",
+		Annotations: readOnly("List key bindings"),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in bindArgs) (*mcp.CallToolResult, bindList, error) {
+		out := bindList{Binds: []bind{}}
+		var raw []rawBind
+		if err := hypr.Query("binds", &raw); err != nil {
+			return nil, out, err
+		}
+		query := strings.ToLower(in.Query)
+		for _, r := range raw {
+			b := toBind(r)
+			if query == "" || strings.Contains(strings.ToLower(strings.Join([]string{b.Keys, b.Dispatcher, b.Arg, b.Description}, " ")), query) {
+				out.Binds = append(out.Binds, b)
+			}
+		}
+		return nil, out, nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_layers",
+		Description: "List layer-shell surfaces (bars, wallpapers, launchers, notifications) on each monitor.",
+		Annotations: readOnly("List layers"),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, layerList, error) {
+		var raw rawLayers
+		if err := hypr.Query("layers", &raw); err != nil {
+			return nil, layerList{}, err
+		}
+		return nil, layerList{Layers: parseLayers(raw)}, nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_devices",
+		Description: "List input devices Hyprland sees: mice, keyboards (with layouts), tablets, touch devices and switches.",
+		Annotations: readOnly("List devices"),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, option, error) {
+		out := option{}
+		return nil, out, hypr.Query("devices", &out)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "cursor_position",
+		Description: "Report where the mouse pointer is, in layout coordinates.",
+		Annotations: readOnly("Cursor position"),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, cursor, error) {
+		var c cursor
+		err := hypr.Query("cursorpos", &c)
+		return nil, c, err
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "reload_config",
+		Description: "Reload the Hyprland config from disk, applying edits and undoing runtime changes from set_option and set_monitor.",
+		Annotations: action("Reload config", false),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, ok, error) {
+		out, err := hypr.Request("reload")
+		if err == nil && strings.TrimSpace(string(out)) != "ok" {
+			err = fmt.Errorf("%s", strings.TrimSpace(string(out)))
+		}
+		return nil, done, err
 	})
 
 	return nil

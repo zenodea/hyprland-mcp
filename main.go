@@ -25,7 +25,8 @@ func init() {
 }
 
 func main() {
-	disable := flag.String("disable", "", "comma-separated tool groups to leave out ("+strings.Join(tools.Groups(), ", ")+")")
+	disable := flag.String("disable", "", "comma-separated tool groups to leave out ("+strings.Join(tools.Groups(false), ", ")+")")
+	enable := flag.String("enable", "", "comma-separated opt-in tool groups to add ("+strings.Join(tools.Groups(true), ", ")+")")
 	config := flag.String("config", tools.DefaultConfig(), "JSON file defining extra command tools")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -35,23 +36,27 @@ func main() {
 		return
 	}
 
-	skip := map[string]bool{}
-	for _, g := range strings.Split(*disable, ",") {
-		if g = strings.TrimSpace(g); g != "" {
-			skip[g] = true
-		}
-	}
-
-	server := mcp.NewServer(&mcp.Implementation{Name: "hyprland", Version: version}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "hyprland", Version: version}, tools.ServerOptions())
 	tools.ConfigPath = *config
-	if err := tools.Register(server, skip); err != nil {
+	if err := tools.Register(server, groupSet(*disable), groupSet(*enable)); err != nil {
 		log.Fatal(err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	tools.Watch(ctx, server)
 
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
 	}
+}
+
+func groupSet(list string) map[string]bool {
+	set := map[string]bool{}
+	for _, g := range strings.Split(list, ",") {
+		if g = strings.TrimSpace(g); g != "" {
+			set[g] = true
+		}
+	}
+	return set
 }
